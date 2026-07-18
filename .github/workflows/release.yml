@@ -1,0 +1,81 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: write
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  build-linux-x86_64:
+    name: Build x86_64-unknown-linux-gnu
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install LLVM / Clang (eBPF link)
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y clang llvm lld libelf-dev
+
+      - uses: dtolnay/rust-toolchain@nightly
+        with:
+          targets: x86_64-unknown-linux-gnu
+          components: rust-src
+
+      - name: Install bpf-linker
+        run: cargo install bpf-linker --locked
+
+      - uses: Swatinem/rust-cache@v2
+
+      - name: Build release binaries
+        run: |
+          cargo build --release \
+            --bin foverin-daemon \
+            --bin foverin-cli \
+            --bin forge
+
+      - name: Ensure weights present
+        run: |
+          if [ ! -f foverin_weights.safetensors ]; then
+            ./target/release/forge
+          fi
+          test -f foverin_weights.safetensors
+
+      - name: Package release asset
+        id: pack
+        run: |
+          set -euo pipefail
+          TAG="${GITHUB_REF_NAME}"
+          STAGE="foverin-${TAG}-x86_64-unknown-linux-gnu"
+          mkdir -p "${STAGE}"
+          cp target/release/foverin-daemon \
+             target/release/foverin-cli \
+             target/release/forge \
+             foverin_weights.safetensors \
+             foverin.service \
+             README.md \
+             LICENSE \
+             LICENSE-MIT \
+             LICENSE-APACHE \
+             SECURITY.md \
+             "${STAGE}/"
+          chmod +x "${STAGE}/foverin-daemon" "${STAGE}/foverin-cli" "${STAGE}/forge"
+          ARCHIVE="${STAGE}.tar.gz"
+          tar -czf "${ARCHIVE}" "${STAGE}"
+          echo "archive=${ARCHIVE}" >> "$GITHUB_OUTPUT"
+          ls -lh "${ARCHIVE}"
+
+      - name: Publish GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: ${{ steps.pack.outputs.archive }}
+          generate_release_notes: true
+          fail_on_unmatched_files: true
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

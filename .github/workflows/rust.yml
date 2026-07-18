@@ -1,0 +1,51 @@
+name: Rust CI
+
+on:
+  push:
+    branches: [main, master]
+  pull_request:
+    branches: [main, master]
+
+env:
+  CARGO_TERM_COLOR: always
+  FOVERIN_SKIP_EBPF: "1"
+  RUSTFLAGS: "-Dwarnings"
+
+jobs:
+  fmt:
+    name: rustfmt
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      # rustfmt.toml uses unstable options (imports_granularity, group_imports).
+      - uses: dtolnay/rust-toolchain@nightly
+        with:
+          components: rustfmt
+      - name: Check formatting
+        run: cargo +nightly fmt --all -- --check
+
+  userspace:
+    name: check + clippy (userspace)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy
+
+      - uses: Swatinem/rust-cache@v2
+
+      - name: Check foverin-common
+        run: cargo check -p foverin-common --all-features
+
+      - name: Check foverin userspace (lib + cli + forge)
+        # FOVERIN_SKIP_EBPF stubs the BPF object so GitHub-hosted runners
+        # can verify Rust logic without llvm/bpf-linker specialized setup.
+        run: cargo check -p foverin --lib --bin foverin-cli --bin forge
+
+      - name: Clippy foverin-common
+        run: cargo clippy -p foverin-common --all-features --all-targets -- -D warnings
+
+      - name: Clippy foverin userspace
+        run: cargo clippy -p foverin --lib --bin foverin-cli --bin forge --all-targets -- -D warnings

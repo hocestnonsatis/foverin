@@ -1,0 +1,22 @@
+[package]
+name = "foverin-ebpf"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+authors.workspace = true
+repository.workspace = true
+homepage.workspace = true
+description = "eBPF sched_process_exec sensor for Foverin"
+publish = false
+
+[dependencies]
+foverin-common = { path = "../foverin-common" }
+
+aya-ebpf = { workspace = true }
+
+[build-dependencies]
+which = { workspace = true }
+
+[[bin]]
+name = "foverin-ebpf"
+path = "src/main.rs"

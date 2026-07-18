@@ -1,0 +1,19 @@
+[Unit]
+Description=Foverin autonomous system optimizer (eBPF + nano-NN + actuator)
+Documentation=file:///usr/local/share/doc/foverin/README.md
+After=multi-user.target
+
+[Service]
+Type=simple
+User=root
+ExecStart=/usr/local/bin/foverin-daemon
+Restart=always
+RestartSec=2
+# Point at installed weights (adjust path after install).
+Environment=FOVERIN_WEIGHTS=/usr/local/share/foverin/foverin_weights.safetensors
+# Logs go to the journal; Matrix UI is a separate unprivileged client.
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target

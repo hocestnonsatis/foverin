@@ -1,0 +1,23 @@
+[package]
+name = "foverin-common"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+authors.workspace = true
+repository.workspace = true
+homepage.workspace = true
+description = "Shared ProcessEvent and StateSnapshot types for Foverin"
+keywords.workspace = true
+categories = ["os", "no-std"]
+
+[features]
+default = []
+user = ["dep:aya", "dep:serde", "dep:serde_json"]
+
+[dependencies]
+aya = { workspace = true, optional = true }
+serde = { workspace = true, optional = true, default-features = false, features = ["derive", "std"] }
+serde_json = { workspace = true, optional = true, default-features = false, features = ["std"] }
+
+[lib]
+path = "src/lib.rs"
