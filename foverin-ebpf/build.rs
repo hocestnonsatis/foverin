@@ -12,6 +12,16 @@ use which::which;
 ///
 /// [bindeps]: https://doc.rust-lang.org/nightly/cargo/reference/unstable.html?highlight=feature#artifact-dependencies
 fn main() {
-    let bpf_linker = which("bpf-linker").unwrap();
+    println!("cargo:rerun-if-env-changed=FOVERIN_SKIP_EBPF");
+    // Userspace CI sets this so GitHub runners can check Rust without bpf-linker.
+    if std::env::var_os("FOVERIN_SKIP_EBPF").is_some() {
+        println!("cargo:warning=FOVERIN_SKIP_EBPF set — skipping bpf-linker probe");
+        return;
+    }
+
+    let bpf_linker = which("bpf-linker").expect(
+        "bpf-linker not found in PATH (install with `cargo install bpf-linker`, \
+         or set FOVERIN_SKIP_EBPF=1 for userspace-only checks)",
+    );
     println!("cargo:rerun-if-changed={}", bpf_linker.to_str().unwrap());
 }
