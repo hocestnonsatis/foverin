@@ -20,7 +20,6 @@ const FRAME_BUDGET: Duration = Duration::from_millis(33); // ~30 FPS
 const GREEN: Color = Color::Green;
 const DIM_GREEN: Color = Color::Rgb(0, 120, 0);
 const BRIGHT: Color = Color::Rgb(80, 255, 80);
-const THROTTLE_RED: Color = Color::Rgb(255, 60, 60);
 const FATAL_RED: Color = Color::Rgb(220, 40, 40);
 
 /// Run the TUI until `q` / `Esc` / `Ctrl+C`. Restores the terminal on exit.
@@ -258,31 +257,12 @@ fn draw_actuator(frame: &mut Frame<'_>, area: Rect, state: &StateSnapshot) {
         Style::default().fg(DIM_GREEN)
     };
 
-    let (cgroup_label, cgroup_style) = if state.cgroup_active {
-        (
-            format!(
-                "CGROUP THROTTLE: [ ACTIVE ({} PIDs) ]",
-                state.cgroup_pid_count
-            ),
-            Style::default()
-                .fg(THROTTLE_RED)
-                .add_modifier(Modifier::BOLD),
-        )
-    } else {
-        (
-            "CGROUP THROTTLE: [ DISABLED ]".to_string(),
-            Style::default().fg(GREEN),
-        )
-    };
-
     let chunks = Layout::default()
         .direction(Direction::Vertical)
         .margin(1)
         .constraints([
             Constraint::Length(1),
             Constraint::Length(2),
-            Constraint::Length(1),
-            Constraint::Length(1),
             Constraint::Length(1),
             Constraint::Min(0),
         ])
@@ -303,22 +283,9 @@ fn draw_actuator(frame: &mut Frame<'_>, area: Rect, state: &StateSnapshot) {
 
     frame.render_widget(
         Paragraph::new(Line::from(Span::styled(
-            "RESOURCE ISOLATION",
-            Style::default().fg(DIM_GREEN),
-        ))),
-        chunks[2],
-    );
-
-    frame.render_widget(
-        Paragraph::new(Line::from(Span::styled(cgroup_label, cgroup_style))),
-        chunks[3],
-    );
-
-    frame.render_widget(
-        Paragraph::new(Line::from(Span::styled(
             &state.status,
             Style::default().fg(DIM_GREEN),
         ))),
-        chunks[4],
+        chunks[2],
     );
 }

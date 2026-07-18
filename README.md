@@ -1,12 +1,12 @@
 # Foverin
 
 **Autonomous Linux workload optimizer.**  
-eBPF senses process activity → a tiny Candle neural net classifies it → sysfs/cgroup actuators protect foreground work. A Matrix-style TUI attaches over a Unix socket whenever you want eyes on the loop.
+eBPF senses process activity → a tiny Candle neural net classifies it → a cpufreq actuator sets the right CPU governor. A Matrix-style TUI attaches over a Unix socket whenever you want eyes on the loop.
 
 [![CI](https://github.com/hocestnonsatis/foverin/actions/workflows/rust.yml/badge.svg)](https://github.com/hocestnonsatis/foverin/actions/workflows/rust.yml)
 [![License: MIT OR Apache-2.0](https://img.shields.io/badge/license-MIT%20OR%20Apache--2.0-blue.svg)](LICENSE)
 
-> Requires **root** for the daemon (eBPF + cpufreq + cgroup v2). The CLI runs as a normal user.
+> Requires **root** for the daemon (eBPF + cpufreq). The CLI runs as a normal user.
 
 ---
 
@@ -23,7 +23,7 @@ flowchart LR
     subgraph "foverin-daemon (root)"
         SEN[Sensor loop]
         NN["Candle nano-NN<br/>VOCAB→64→32→4"]
-        ACT["Actuator<br/>cpufreq + cgroup v2"]
+        ACT["Actuator<br/>cpufreq governors"]
         UDS["Unix socket<br/>/tmp/foverin.sock"]
         RB --> SEN
         SEN -->|"5s windows"| NN
@@ -62,13 +62,13 @@ The prototype lived under the working title **Panopticon** — Bentham’s all-s
 1. **Sense** — An Aya eBPF program attaches to `sched_process_exec` and streams `ProcessEvent { pid, filename }` into a RingBuf.
 2. **Aggregate** — Every 5 seconds the daemon multi-hot-encodes process basenames against a fixed Linux vocabulary.
 3. **Classify** — A custom Candle feed-forward net (`VOCAB → 64 → 32 → 4`) runs Softmax → `argmax` → one of `COMPILING | GAMING | BROWSING | IDLE` plus a confidence %. Empty windows short-circuit to `IDLE` @ 100% (no forward pass).
-4. **Actuate** — Under `COMPILING` / `GAMING`: all CPUs → `performance`, known background hogs (Spotify, Discord, browsers, …) land in a cgroup with `cpu.max ≈ 10% of one core` and `memory.high = 1G`. Under `BROWSING` / `IDLE`: efficiency governor + limits lifted.
+4. **Actuate** — Under `COMPILING` / `GAMING`: all CPUs → `performance`. Under `BROWSING` / `IDLE`: efficiency governor (`schedutil`, else `powersave`).
 5. **Observe** — `StateSnapshot` JSON is broadcast on `/tmp/foverin.sock`. `foverin-cli` paints the Matrix TUI; quitting the CLI does **not** stop the daemon.
 
-| Workload | Governor | Cgroup throttle |
-| --- | --- | --- |
-| `COMPILING` / `GAMING` | `performance` | Active |
-| `BROWSING` / `IDLE` | `schedutil` (else `powersave`) | Disabled |
+| Workload | Governor |
+| --- | --- |
+| `COMPILING` / `GAMING` | `performance` |
+| `BROWSING` / `IDLE` | `schedutil` (else `powersave`) |
 
 ---
 
@@ -84,7 +84,7 @@ rustup +nightly component add rust-src
 cargo install bpf-linker
 ```
 
-Also ensure a recent kernel with **cgroup v2** unified hierarchy (default on Arch/CachyOS) and a writable cpufreq sysfs (`scaling_governor`).
+Also ensure a writable cpufreq sysfs (`scaling_governor`).
 
 ### Build from source
 
@@ -141,7 +141,7 @@ GitHub Releases (`v*` tags) ship `x86_64-unknown-linux-gnu` binaries plus `fover
 | --- | --- |
 | Left | **eBPF SENSOR STREAM** — last ~50 execs |
 | Top right | **NANO-NN INFERENCE** — workload, confidence, latency |
-| Bottom right | **SYSFS ACTUATOR** — governor + cgroup throttle |
+| Bottom right | **SYSFS ACTUATOR** — active CPU governor |
 
 If the daemon is down: `[ FATAL ]: FOVERIN DAEMON NOT REACHABLE`.
 
@@ -180,6 +180,5 @@ Dual-licensed under **MIT** OR **Apache-2.0**. See [LICENSE](LICENSE), [LICENSE-
 1. `./target/release/forge` — high probe accuracy.  
 2. `sudo -E ./target/release/foverin-daemon &`  
 3. `./target/release/foverin-cli` — live Matrix uplink.  
-4. Quit the TUI; confirm the daemon still throttles.  
-5. `cat /sys/devices/system/cpu/cpu0/cpufreq/scaling_governor`  
-6. Under compile load: `cat /sys/fs/cgroup/foverin_background/cpu.max` → `10000 100000`
+4. Quit the TUI; confirm the daemon keeps actuating.  
+5. Under compile load: `cat /sys/devices/system/cpu/cpu0/cpufreq/scaling_governor` → `performance`

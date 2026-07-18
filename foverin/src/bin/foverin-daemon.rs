@@ -1,4 +1,4 @@
-//! Foverin daemon — eBPF sensor, nano-NN inference, sysfs/cgroup actuator, UDS server.
+//! Foverin daemon — eBPF sensor, nano-NN inference, cpufreq actuator, UDS server.
 
 use std::{
     fs, mem,
@@ -9,7 +9,7 @@ use std::{
 
 use aya::{maps::RingBuf, programs::TracePoint};
 use foverin::{
-    actuator::{apply_system_profile, current_governor, manage_cgroups},
+    actuator::{apply_system_profile, current_governor},
     brain::{Classifier, Workload, resolve_weights_path},
     state::AppState,
 };
@@ -230,18 +230,6 @@ async fn sensor_loop(
                     Err(err) => {
                         let mut s = state.lock().unwrap_or_else(|e| e.into_inner());
                         s.status = format!("actuator failed: {err}");
-                    }
-                }
-
-                match manage_cgroups(&decision.detected_workload) {
-                    Ok(cg) => {
-                        let mut s = state.lock().unwrap_or_else(|e| e.into_inner());
-                        s.set_cgroup_throttle(cg.active, cg.pid_count);
-                    }
-                    Err(err) => {
-                        warn!("cgroup throttle failed: {err}");
-                        let mut s = state.lock().unwrap_or_else(|e| e.into_inner());
-                        s.set_cgroup_throttle(false, 0);
                     }
                 }
 

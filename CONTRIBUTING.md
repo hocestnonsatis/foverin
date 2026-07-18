@@ -44,7 +44,7 @@ a **full** local build **without** `FOVERIN_SKIP_EBPF` and smoke-test with
 | --- | --- |
 | `foverin-ebpf/` | BPF program |
 | `foverin/src/brain.rs` | Candle classifier |
-| `foverin/src/actuator.rs` | cpufreq + cgroup v2 |
+| `foverin/src/actuator.rs` | cpufreq governor writes |
 | `foverin/src/bin/foverin-daemon.rs` | Privileged daemon + UDS |
 | `foverin/src/bin/foverin-cli.rs` | TUI client |
 | `foverin-common/` | `ProcessEvent`, `StateSnapshot` |

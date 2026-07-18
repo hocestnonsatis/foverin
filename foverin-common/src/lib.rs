@@ -36,10 +36,6 @@ mod ipc {
         pub latency_us: u64,
         /// Active CPU scaling governor.
         pub active_governor: String,
-        /// Whether background-hog cgroup throttle is engaged.
-        pub cgroup_active: bool,
-        /// Number of PIDs currently in the throttle cgroup.
-        pub cgroup_pid_count: usize,
         /// Status / reason line.
         pub status: String,
     }
@@ -52,8 +48,6 @@ mod ipc {
                 confidence: 0.0,
                 latency_us: 0,
                 active_governor: "unknown".into(),
-                cgroup_active: false,
-                cgroup_pid_count: 0,
                 status: String::new(),
             }
         }

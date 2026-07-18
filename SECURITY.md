@@ -6,7 +6,6 @@
 
 - Loads and attaches an eBPF program (`sched_process_exec`)
 - Writes CPU frequency governors under `/sys/devices/system/cpu/*/cpufreq/`
-- Creates and manages `/sys/fs/cgroup/foverin_background/` (cgroup v2)
 
 Do **not** expose the daemon to untrusted users as a “convenience service” without understanding the trust boundary below.
 
@@ -16,9 +15,9 @@ Do **not** expose the daemon to untrusted users as a “convenience service” w
 
 | Surface | Mode | Notes |
 | --- | --- | --- |
-| `/tmp/foverin.sock` | `0666` | Any local user can connect and **read** live `StateSnapshot` JSON (process names, workload labels, governor, cgroup status). This is intentional so a normal desktop session can open the TUI without sudo. |
+| `/tmp/foverin.sock` | `0666` | Any local user can connect and **read** live `StateSnapshot` JSON (process names, workload labels, governor). This is intentional so a normal desktop session can open the TUI without sudo. |
 | Socket contents | NDJSON | Telemetry only today — no command channel. Treat future write APIs as high risk. |
-| eBPF / sysfs / cgroup | root | Full machine control for frequency and background isolation. |
+| eBPF / cpufreq sysfs | root | Machine control for process sensing and CPU frequency governors. |
 
 ### Implications
 

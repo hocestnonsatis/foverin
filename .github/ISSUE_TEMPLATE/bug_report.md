@@ -35,11 +35,11 @@ A clear, one-sentence description of the bug.
 # or RUST_LOG=debug sudo -E ./target/release/foverin-daemon
 ```
 
-Relevant sysfs / cgroup output if actuator-related:
+Relevant sysfs output if actuator-related:
 
 ```text
 cat /sys/devices/system/cpu/cpu0/cpufreq/scaling_governor
-cat /sys/fs/cgroup/foverin_background/cpu.max
+cat /sys/devices/system/cpu/cpu0/cpufreq/scaling_available_governors
 ```
 
 ## Additional context

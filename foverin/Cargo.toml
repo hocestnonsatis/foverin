@@ -26,7 +26,6 @@ log = { workspace = true }
 rand = { workspace = true }
 ratatui = { workspace = true }
 serde_json = { workspace = true }
-sysinfo = { workspace = true }
 tokio = { workspace = true, features = [
     "macros",
     "rt",
