@@ -23,13 +23,22 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y clang llvm lld libelf-dev
 
+      # Userspace builds on stable — recent nightlies ICE'd compiling tokio in release.
+      # eBPF still needs nightly + rust-src (aya-build / build-std).
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: x86_64-unknown-linux-gnu
+
       - uses: dtolnay/rust-toolchain@nightly
         with:
           targets: x86_64-unknown-linux-gnu
           components: rust-src
 
+      - name: Prefer stable for cargo
+        run: rustup default stable
+
       - name: Install bpf-linker
-        run: cargo install bpf-linker --locked
+        run: cargo +nightly install bpf-linker --locked
 
       - uses: Swatinem/rust-cache@v2
 
@@ -67,5 +76,16 @@ jobs:
           files: ${{ steps.pack.outputs.archive }}
           generate_release_notes: true
           fail_on_unmatched_files: true
+          body: |
+            ## Foverin ${{ github.ref_name }}
+
+            Autonomous cpufreq policy via episodic memory (UCB1 + EMA). No Candle / offline trainer.
+
+            ### Assets
+            Linux `x86_64-unknown-linux-gnu` tarball: daemon + CLI + systemd unit + docs.
+
+            ### Upgrade notes
+            - Weights / `forge` / `FOVERIN_WEIGHTS` removed
+            - Memory persists to `foverin_memory.json` (`FOVERIN_MEMORY`)
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
