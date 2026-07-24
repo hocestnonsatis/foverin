@@ -1,12 +1,18 @@
 # Foverin
 
-**Autonomous Linux workload optimizer.**  
-eBPF senses process activity → a tiny Candle neural net classifies it → a cpufreq actuator sets the right CPU governor. A Matrix-style TUI attaches over a Unix socket whenever you want eyes on the loop.
+**Your CPU does not know what you are doing. Foverin does.**
+
+eBPF watches every `exec`. A nano neural net classifies the workload in 5s windows. A cpufreq actuator flips governors before the storm hits. Matrix TUI optional — the loop never sleeps.
 
 [![CI](https://github.com/hocestnonsatis/foverin/actions/workflows/rust.yml/badge.svg)](https://github.com/hocestnonsatis/foverin/actions/workflows/rust.yml)
 [![License: MIT OR Apache-2.0](https://img.shields.io/badge/license-MIT%20OR%20Apache--2.0-blue.svg)](LICENSE)
 
-> Requires **root** for the daemon (eBPF + cpufreq). The CLI runs as a normal user.
+```
+sense → classify → actuate → (watch)
+eBPF     Candle NN   cpufreq      Ratatui
+```
+
+> **Root required** for the daemon (eBPF + sysfs). The CLI is unprivileged.
 
 ---
 
@@ -39,65 +45,54 @@ flowchart LR
     end
 ```
 
-| Component | Role |
+| Crate | Job |
 | --- | --- |
-| `foverin-ebpf` | BPF program on `sched:sched_process_exec` |
-| `foverin-daemon` | Sensor + inference + actuator + UDS server |
-| `foverin-cli` | Unprivileged Ratatui client |
+| `foverin-ebpf` | Tracepoint → RingBuf |
+| `foverin-daemon` | Sense · infer · actuate · broadcast |
+| `foverin-cli` | Unprivileged Matrix uplink |
 | `forge` | Offline trainer → `foverin_weights.safetensors` |
-| `foverin-common` | Shared `ProcessEvent` + serializable `StateSnapshot` |
+| `foverin-common` | Shared events + snapshots |
 
 ---
 
-## Why “Foverin”?
+## The loop
 
-The prototype lived under the working title **Panopticon** — Bentham’s all-seeing prison, a blunt metaphor for system-wide observation. For the public brand we wanted something that kept the *foresight* without the dystopia.
-
-**Foverin** is a coined name: *fore-* (ahead, before contention) blended into a compact, pronounceable word. It is the daemon that watches the machine’s near future — compile storms, game sessions, idle drift — and acts a few seconds early so background apps do not steal your L3 and CPU cycles.
-
----
-
-## How it works
-
-1. **Sense** — An Aya eBPF program attaches to `sched_process_exec` and streams `ProcessEvent { pid, filename }` into a RingBuf.
-2. **Aggregate** — Every 5 seconds the daemon multi-hot-encodes process basenames against a fixed Linux vocabulary.
-3. **Classify** — A custom Candle feed-forward net (`VOCAB → 64 → 32 → 4`) runs Softmax → `argmax` → one of `COMPILING | GAMING | BROWSING | IDLE` plus a confidence %. Empty windows short-circuit to `IDLE` @ 100% (no forward pass).
-4. **Actuate** — Under `COMPILING` / `GAMING`: all CPUs → `performance`. Under `BROWSING` / `IDLE`: efficiency governor (`schedutil`, else `powersave`).
-5. **Observe** — `StateSnapshot` JSON is broadcast on `/tmp/foverin.sock`. `foverin-cli` paints the Matrix TUI; quitting the CLI does **not** stop the daemon.
+1. **Sense** — Aya eBPF on `sched_process_exec` streams `ProcessEvent { pid, filename }` into a RingBuf.
+2. **Aggregate** — Every 5s, multi-hot-encode process basenames against a fixed Linux vocabulary.
+3. **Classify** — Candle feed-forward (`VOCAB → 64 → 32 → 4`) → Softmax → `argmax` → `COMPILING | GAMING | BROWSING | IDLE` + confidence. Empty window → `IDLE` @ 100% (no forward pass).
+4. **Actuate** — Hot workloads pin `performance`. Quiet ones drop to `schedutil` (else `powersave`).
+5. **Observe** — `StateSnapshot` NDJSON on `/tmp/foverin.sock`. Quit the TUI; the daemon keeps running.
 
 | Workload | Governor |
 | --- | --- |
 | `COMPILING` / `GAMING` | `performance` |
-| `BROWSING` / `IDLE` | `schedutil` (else `powersave`) |
+| `BROWSING` / `IDLE` | `schedutil` → `powersave` |
 
 ---
 
-## Installation
+## Install
 
 ### Dependencies (CachyOS / Arch)
 
 ```bash
 sudo pacman -S --needed base-devel rustup llvm clang
-# Nightly is required for the eBPF crate (build-std).
 rustup toolchain install nightly
 rustup +nightly component add rust-src
 cargo install bpf-linker
 ```
 
-Also ensure a writable cpufreq sysfs (`scaling_governor`).
+Nightly is required for the eBPF crate (`build-std`). cpufreq sysfs must be writable (`scaling_governor`).
 
-### Build from source
+### Build
 
 ```bash
 git clone https://github.com/hocestnonsatis/foverin.git
 cd foverin
 
-# Train (or use a release asset’s weights)
 cargo build --release --bin forge
 ./target/release/forge
 # → foverin_weights.safetensors (~22 KB)
 
-# Daemon + CLI
 cargo build --release --bin foverin-daemon --bin foverin-cli
 ```
 
@@ -111,9 +106,8 @@ sudo -E ./target/release/foverin-daemon
 ./target/release/foverin-cli
 ```
 
-Override weights: `FOVERIN_WEIGHTS=/path/to/file.safetensors`.
-
-Socket: `/tmp/foverin.sock` (created mode `0666` so unprivileged clients can connect — see [SECURITY.md](SECURITY.md)).
+Weights override: `FOVERIN_WEIGHTS=/path/to/file.safetensors`  
+Socket: `/tmp/foverin.sock` (mode `0666` — see [SECURITY.md](SECURITY.md))
 
 ### Systemd
 
@@ -129,30 +123,28 @@ sudo systemctl enable --now foverin.service
 foverin-cli   # attach anytime
 ```
 
-### Prebuilt releases
+### Prebuilt
 
-GitHub Releases (`v*` tags) ship `x86_64-unknown-linux-gnu` binaries plus `foverin_weights.safetensors`. Prefer building from source if your kernel/toolchain differs.
+GitHub Releases (`v*` tags) ship `x86_64-unknown-linux-gnu` binaries + weights. Prefer source if your kernel/toolchain differs.
 
 ---
 
 ## TUI
 
-| Pane | Content |
+| Pane | Live feed |
 | --- | --- |
 | Left | **eBPF SENSOR STREAM** — last ~50 execs |
-| Top right | **NANO-NN INFERENCE** — workload, confidence, latency |
-| Bottom right | **SYSFS ACTUATOR** — active CPU governor |
+| Top right | **NANO-NN INFERENCE** — class, confidence, latency |
+| Bottom right | **SYSFS ACTUATOR** — active governor |
 
-If the daemon is down: `[ FATAL ]: FOVERIN DAEMON NOT REACHABLE`.
-
-Keys: `q` / `Esc` / `Ctrl+C` quit the CLI only.
+Daemon down → `[ FATAL ]: FOVERIN DAEMON NOT REACHABLE`  
+Keys: `q` / `Esc` / `Ctrl+C` — CLI only; daemon stays up.
 
 ---
 
 ## Development
 
 ```bash
-# Format / lint (userspace; skips BPF object)
 FOVERIN_SKIP_EBPF=1 cargo fmt --all -- --check
 FOVERIN_SKIP_EBPF=1 cargo clippy -p foverin-common -p foverin --all-targets -- -D warnings
 FOVERIN_SKIP_EBPF=1 cargo check -p foverin-common --all-features
@@ -165,20 +157,20 @@ See [CONTRIBUTING.md](CONTRIBUTING.md) and [CODE_OF_CONDUCT.md](.github/CODE_OF_
 
 ## Security
 
-Foverin is a **privileged** control plane. Read [SECURITY.md](SECURITY.md) before deploying.
+Privileged control plane. Read [SECURITY.md](SECURITY.md) before you deploy.
 
 ---
 
 ## License
 
-Dual-licensed under **MIT** OR **Apache-2.0**. See [LICENSE](LICENSE), [LICENSE-MIT](LICENSE-MIT), and [LICENSE-APACHE](LICENSE-APACHE).
+**MIT** OR **Apache-2.0** — [LICENSE](LICENSE), [LICENSE-MIT](LICENSE-MIT), [LICENSE-APACHE](LICENSE-APACHE).
 
 ---
 
-## Crucible checklist
+## Smoke test
 
-1. `./target/release/forge` — high probe accuracy.  
+1. `./target/release/forge` — high probe accuracy  
 2. `sudo -E ./target/release/foverin-daemon &`  
-3. `./target/release/foverin-cli` — live Matrix uplink.  
-4. Quit the TUI; confirm the daemon keeps actuating.  
+3. `./target/release/foverin-cli` — live Matrix uplink  
+4. Quit TUI → daemon still actuating  
 5. Under compile load: `cat /sys/devices/system/cpu/cpu0/cpufreq/scaling_governor` → `performance`
