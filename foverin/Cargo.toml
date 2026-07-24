@@ -8,7 +8,7 @@ repository.workspace = true
 homepage.workspace = true
 documentation.workspace = true
 readme.workspace = true
-description = "Foverin userspace library, daemon, CLI, and Forge trainer"
+description = "Foverin userspace library, daemon, and CLI"
 keywords.workspace = true
 categories.workspace = true
 
@@ -17,14 +17,12 @@ foverin-common = { path = "../foverin-common", features = ["user"] }
 
 anyhow = { workspace = true, default-features = true }
 aya = { workspace = true }
-candle-core = { workspace = true }
-candle-nn = { workspace = true }
 crossterm = { workspace = true }
 env_logger = { workspace = true }
 libc = { workspace = true }
 log = { workspace = true }
-rand = { workspace = true }
 ratatui = { workspace = true }
+serde = { workspace = true }
 serde_json = { workspace = true }
 tokio = { workspace = true, features = [
     "macros",
@@ -66,7 +64,3 @@ path = "src/bin/foverin-daemon.rs"
 [[bin]]
 name = "foverin-cli"
 path = "src/bin/foverin-cli.rs"
-
-[[bin]]
-name = "forge"
-path = "src/bin/forge.rs"

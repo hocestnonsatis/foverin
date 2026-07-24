@@ -46,5 +46,5 @@ We aim to acknowledge reports within 7 days and coordinate disclosure after a fi
 
 - “Daemon needs root” — by design for eBPF and sysfs actuation
 - Local users reading `/tmp/foverin.sock` telemetry under mode `0666` — documented trade-off
-- Misconfiguration of systemd unit paths or missing weight files
+- Misconfiguration of systemd unit paths or missing memory files
 - Running untrusted third-party builds of the daemon as root

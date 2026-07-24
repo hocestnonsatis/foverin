@@ -1,24 +1,22 @@
-//! Custom micro-neural network for OS workload classification.
+//! Workload fingerprinting and soft labels for the episodic memory policy.
 //!
 //! Process windows are multi-hot encoded against a static Linux-process
-//! vocabulary, then classified by a tiny feed-forward net:
-//! `VOCAB → 64 (ReLU) → 32 (ReLU) → 4` (`COMPILING|GAMING|BROWSING|IDLE`).
+//! vocabulary. The bitset becomes a bucket fingerprint for UCB memory;
+//! `COMPILING|GAMING|BROWSING|IDLE` labels are UI-only heuristics.
 
-use std::{
-    path::{Path, PathBuf},
-    time::Instant,
-};
+use std::time::Instant;
 
-use anyhow::{Context as _, Result, bail};
-use candle_core::{D, DType, Device, Tensor};
-use candle_nn::{Linear, Module, VarBuilder, ops};
+use anyhow::Result;
 use foverin_common::ProcessEvent;
 
-/// Default weights path (written by `forge`, loaded by the daemon).
-pub const DEFAULT_WEIGHTS_PATH: &str = "foverin_weights.safetensors";
+use crate::{
+    actuator,
+    memory::{EpisodeMemory, resolve_memory_path},
+    reward::{MetricSampler, balanced_reward},
+};
 
 /// Static vocabulary of common Linux process basenames.
-/// Order is part of the model contract — do not reorder after training.
+/// Order is part of the fingerprint contract — do not reorder after deploy.
 pub const VOCAB: &[&str] = &[
     // Build / compile toolchain
     "rustc",
@@ -75,9 +73,9 @@ pub const VOCAB: &[&str] = &[
     "pacman",
 ];
 
-pub const HIDDEN1: usize = 64;
-pub const HIDDEN2: usize = 32;
-pub const NUM_CLASSES: usize = 4;
+const COMPILE_END: usize = 17;
+const GAMING_END: usize = 29;
+const BROWSING_END: usize = 39;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 #[repr(u8)]
@@ -98,52 +96,125 @@ impl Workload {
         }
     }
 
-    pub fn from_index(idx: usize) -> Result<Self> {
-        match idx {
-            0 => Ok(Self::Compiling),
-            1 => Ok(Self::Gaming),
-            2 => Ok(Self::Browsing),
-            3 => Ok(Self::Idle),
-            _ => bail!("invalid workload class index {idx}"),
+    /// Cold-start governor prior for UCB (not the decision itself).
+    pub fn prior_governor(self) -> &'static str {
+        match self {
+            Self::Compiling | Self::Gaming => "performance",
+            Self::Browsing | Self::Idle => actuator::preferred_efficiency_governor(),
         }
     }
-
-    pub fn index(self) -> usize {
-        self as usize
-    }
 }
 
-/// Structured decision produced by the nano-network.
+/// Structured decision produced by the memory policy.
 #[derive(Debug, Clone)]
-pub struct AiDecision {
+pub struct PolicyDecision {
     pub detected_workload: Workload,
-    /// Softmax confidence of the winning class, as a percentage (0–100).
+    /// Selection confidence percentage (0–100).
     pub confidence: f32,
     pub reason: String,
-    /// Wall-clock forward-pass duration (encode + infer + argmax), µs.
+    /// Wall-clock decide latency (fingerprint + UCB), µs.
     pub inference_us: u128,
+    pub governor: String,
+    pub fingerprint: u64,
 }
 
-/// Tiny feed-forward classifier shared by Forge (train) and Foverin (infer).
-pub struct WorkloadNet {
-    fc1: Linear,
-    fc2: Linear,
-    fc3: Linear,
+struct PendingCredit {
+    fingerprint: u64,
+    governor: String,
 }
 
-impl WorkloadNet {
-    pub fn new(vb: VarBuilder) -> candle_core::Result<Self> {
+/// Runtime policy: episodic memory + delayed reward credit.
+pub struct PolicyEngine {
+    memory: EpisodeMemory,
+    metrics: MetricSampler,
+    pending: Option<PendingCredit>,
+    primed: bool,
+}
+
+impl PolicyEngine {
+    pub fn open() -> Result<Self> {
+        let actions = actuator::available_governors();
+        let path = resolve_memory_path();
+        let memory = EpisodeMemory::open(path, actions)?;
         Ok(Self {
-            fc1: candle_nn::linear(VOCAB.len(), HIDDEN1, vb.pp("fc1"))?,
-            fc2: candle_nn::linear(HIDDEN1, HIDDEN2, vb.pp("fc2"))?,
-            fc3: candle_nn::linear(HIDDEN2, NUM_CLASSES, vb.pp("fc3"))?,
+            memory,
+            metrics: MetricSampler::new(),
+            pending: None,
+            primed: false,
         })
     }
 
-    pub fn forward(&self, xs: &Tensor) -> candle_core::Result<Tensor> {
-        let xs = self.fc1.forward(xs)?.relu()?;
-        let xs = self.fc2.forward(&xs)?.relu()?;
-        self.fc3.forward(&xs)
+    pub fn memory_path(&self) -> &std::path::Path {
+        self.memory.path()
+    }
+
+    pub fn flush(&mut self) -> Result<()> {
+        self.memory.save()
+    }
+
+    /// Credit the previous action (if any), then select a governor for `events`.
+    pub fn decide(&mut self, events: &[ProcessEvent]) -> PolicyDecision {
+        let metrics = self.metrics.sample();
+        if self.primed
+            && let Some(prev) = self.pending.take()
+        {
+            let reward = balanced_reward(metrics, &prev.governor);
+            self.memory.update(prev.fingerprint, &prev.governor, reward);
+        }
+        self.primed = true;
+
+        let start = Instant::now();
+        let multi_hot = encode_events(events);
+        let fingerprint = fingerprint_bits(&multi_hot);
+        let workload = soft_label(&multi_hot);
+        let prior = resolve_prior(workload, self.memory.actions());
+        let selection = self.memory.select(fingerprint, &prior);
+        let inference_us = start.elapsed().as_micros();
+
+        let active: Vec<&str> = VOCAB
+            .iter()
+            .zip(multi_hot.iter())
+            .filter(|(_, v)| **v > 0.0)
+            .map(|(name, _)| *name)
+            .collect();
+        let reason = if active.is_empty() {
+            format!(
+                "memory bucket {fingerprint:#x} → {} (empty / unrecognized window)",
+                selection.governor
+            )
+        } else {
+            format!(
+                "memory bucket {fingerprint:#x} hits=[{}] → {}",
+                active.join(", "),
+                selection.governor
+            )
+        };
+
+        self.pending = Some(PendingCredit {
+            fingerprint,
+            governor: selection.governor.clone(),
+        });
+
+        PolicyDecision {
+            detected_workload: workload,
+            confidence: selection.confidence,
+            reason,
+            inference_us,
+            governor: selection.governor,
+            fingerprint,
+        }
+    }
+}
+
+fn resolve_prior(workload: Workload, actions: &[String]) -> String {
+    let want = workload.prior_governor();
+    if actions.iter().any(|a| a == want) {
+        want.to_string()
+    } else {
+        actions
+            .first()
+            .cloned()
+            .unwrap_or_else(|| "powersave".into())
     }
 }
 
@@ -166,6 +237,37 @@ pub fn encode_events(events: &[ProcessEvent]) -> Vec<f32> {
     encode_names(events.iter().map(|e| filename_str(&e.filename)))
 }
 
+/// Bitset fingerprint of a multi-hot VOCAB vector (`VOCAB.len() ≤ 64`).
+pub fn fingerprint_bits(multi_hot: &[f32]) -> u64 {
+    debug_assert!(VOCAB.len() <= 64);
+    let mut bits = 0u64;
+    for (i, v) in multi_hot.iter().enumerate().take(64) {
+        if *v > 0.0 {
+            bits |= 1u64 << i;
+        }
+    }
+    bits
+}
+
+/// UI-only soft label from VOCAB group hits (priority: compile > gaming > browsing > idle).
+pub fn soft_label(multi_hot: &[f32]) -> Workload {
+    let hit = |start: usize, end: usize| {
+        multi_hot
+            .get(start..end)
+            .map(|s| s.iter().any(|v| *v > 0.0))
+            .unwrap_or(false)
+    };
+    if hit(0, COMPILE_END) {
+        Workload::Compiling
+    } else if hit(COMPILE_END, GAMING_END) {
+        Workload::Gaming
+    } else if hit(GAMING_END, BROWSING_END) {
+        Workload::Browsing
+    } else {
+        Workload::Idle
+    }
+}
+
 pub fn basename(path: &str) -> &str {
     path.rsplit('/').next().unwrap_or(path)
 }
@@ -173,93 +275,6 @@ pub fn basename(path: &str) -> &str {
 pub fn filename_str(bytes: &[u8]) -> &str {
     let end = bytes.iter().position(|&b| b == 0).unwrap_or(bytes.len());
     core::str::from_utf8(&bytes[..end]).unwrap_or("?")
-}
-
-/// Resolve where to load/save weights (env override → CWD → next to exe).
-pub fn resolve_weights_path() -> PathBuf {
-    if let Ok(p) = std::env::var("FOVERIN_WEIGHTS") {
-        return PathBuf::from(p);
-    }
-    let cwd = PathBuf::from(DEFAULT_WEIGHTS_PATH);
-    if cwd.is_file() {
-        return cwd;
-    }
-    if let Ok(exe) = std::env::current_exe()
-        && let Some(dir) = exe.parent()
-    {
-        let sibling = dir.join(DEFAULT_WEIGHTS_PATH);
-        if sibling.is_file() {
-            return sibling;
-        }
-    }
-    cwd
-}
-
-/// Loaded inference engine: model + device, ready for sub-millisecond forward passes.
-pub struct Classifier {
-    model: WorkloadNet,
-    device: Device,
-}
-
-impl Classifier {
-    /// Load `foverin_weights.safetensors` into memory at startup.
-    pub fn load(path: impl AsRef<Path>) -> Result<Self> {
-        let path = path.as_ref();
-        let device = Device::Cpu;
-        // SAFETY: weights file is trusted (produced by our own `forge` binary).
-        let vb = unsafe {
-            VarBuilder::from_mmaped_safetensors(&[path], DType::F32, &device)
-                .with_context(|| format!("mmap safetensors {}", path.display()))?
-        };
-        let model = WorkloadNet::new(vb).context("construct WorkloadNet from weights")?;
-        Ok(Self { model, device })
-    }
-
-    /// Encode + forward + softmax + argmax.
-    ///
-    /// Returns `(workload, confidence_percent)` where confidence is the winning
-    /// Softmax probability × 100 (e.g. `98.5`). Target: ≪ 1 ms on CPU.
-    pub fn classify_vector(&self, multi_hot: &[f32]) -> Result<(Workload, f32)> {
-        let input = Tensor::from_slice(multi_hot, (1, VOCAB.len()), &self.device)
-            .context("build input tensor")?;
-        let logits = self.model.forward(&input).context("forward pass")?;
-        let probs = ops::softmax(&logits, D::Minus1).context("softmax")?;
-        let class = probs
-            .argmax(D::Minus1)?
-            .to_dtype(DType::U32)?
-            .to_vec1::<u32>()?[0] as usize;
-        let confidence = probs
-            .get(0)?
-            .get(class)?
-            .to_scalar::<f32>()
-            .context("read softmax confidence")?
-            * 100.0;
-        Ok((Workload::from_index(class)?, confidence))
-    }
-
-    pub fn classify_events(&self, events: &[ProcessEvent]) -> Result<AiDecision> {
-        let multi_hot = encode_events(events);
-        let active: Vec<&str> = VOCAB
-            .iter()
-            .zip(multi_hot.iter())
-            .filter(|(_, v)| **v > 0.0)
-            .map(|(name, _)| *name)
-            .collect();
-        let start = Instant::now();
-        let (workload, confidence) = self.classify_vector(&multi_hot)?;
-        let inference_us = start.elapsed().as_micros();
-        let reason = if active.is_empty() {
-            "empty / unrecognized process window → IDLE".into()
-        } else {
-            format!("multi-hot hits: [{}]", active.join(", "))
-        };
-        Ok(AiDecision {
-            detected_workload: workload,
-            confidence,
-            reason,
-            inference_us,
-        })
-    }
 }
 
 #[cfg(test)]
@@ -277,5 +292,34 @@ mod tests {
     #[test]
     fn basename_strips_path() {
         assert_eq!(basename("/usr/bin/firefox"), "firefox");
+    }
+
+    #[test]
+    fn soft_label_priority() {
+        let mut v = vec![0.0f32; VOCAB.len()];
+        v[VOCAB.iter().position(|x| *x == "firefox").unwrap()] = 1.0;
+        assert_eq!(soft_label(&v), Workload::Browsing);
+        v[VOCAB.iter().position(|x| *x == "cargo").unwrap()] = 1.0;
+        assert_eq!(soft_label(&v), Workload::Compiling);
+        let empty = vec![0.0f32; VOCAB.len()];
+        assert_eq!(soft_label(&empty), Workload::Idle);
+    }
+
+    #[test]
+    fn fingerprint_stable() {
+        let a = encode_names(["cargo", "rustc"]);
+        let b = encode_names(["rustc", "cargo"]);
+        assert_eq!(fingerprint_bits(&a), fingerprint_bits(&b));
+        assert_ne!(fingerprint_bits(&a), 0);
+        assert_eq!(fingerprint_bits(&vec![0.0; VOCAB.len()]), 0);
+    }
+
+    #[test]
+    fn vocab_fits_u64() {
+        assert!(VOCAB.len() <= 64);
+        assert_eq!(COMPILE_END, 17);
+        assert_eq!(GAMING_END, 29);
+        assert_eq!(BROWSING_END, 39);
+        assert_eq!(VOCAB.len(), 49);
     }
 }

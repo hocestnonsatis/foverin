@@ -16,12 +16,39 @@ pub fn current_governor() -> String {
         .unwrap_or_else(|_| "unknown".into())
 }
 
-/// Apply a CPU scaling profile derived from an AI workload label.
+/// Governors available on cpu0, preferring a stable decision set.
+pub fn available_governors() -> Vec<String> {
+    let preferred = ["performance", "schedutil", "powersave", "ondemand"];
+    let path = Path::new(CPUFREQ_ROOT).join("cpu0/cpufreq/scaling_available_governors");
+    let Ok(raw) = fs::read_to_string(path) else {
+        return vec!["performance".into(), "powersave".into()];
+    };
+    let have: Vec<&str> = raw.split_whitespace().collect();
+    let mut out: Vec<String> = preferred
+        .iter()
+        .filter(|g| have.iter().any(|h| h == *g))
+        .map(|s| (*s).to_string())
+        .collect();
+    if out.is_empty() {
+        out = have.into_iter().map(str::to_string).collect();
+    }
+    if out.is_empty() {
+        out.push("powersave".into());
+    }
+    out
+}
+
+/// Apply a CPU scaling profile derived from a soft workload label (legacy helper).
 pub fn apply_system_profile(workload: &str) -> io::Result<ActuatorReport> {
     let governor = governor_for_workload(workload);
+    set_scaling_governor(governor)
+}
+
+/// Write `governor` to all CPUs' `scaling_governor` nodes.
+pub fn set_scaling_governor(governor: &str) -> io::Result<ActuatorReport> {
     set_all_governors(governor)?;
     Ok(ActuatorReport {
-        workload: workload.to_string(),
+        workload: String::new(),
         governor: governor.to_string(),
     })
 }
@@ -61,7 +88,7 @@ fn governor_for_workload(workload: &str) -> &'static str {
     }
 }
 
-fn preferred_efficiency_governor() -> &'static str {
+pub fn preferred_efficiency_governor() -> &'static str {
     if governor_is_available("schedutil") {
         "schedutil"
     } else if governor_is_available("powersave") {

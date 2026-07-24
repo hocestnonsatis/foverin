@@ -1,4 +1,4 @@
-//! Foverin daemon — eBPF sensor, nano-NN inference, cpufreq actuator, UDS server.
+//! Foverin daemon — eBPF sensor, episodic memory policy, cpufreq actuator, UDS server.
 
 use std::{
     fs, mem,
@@ -9,8 +9,8 @@ use std::{
 
 use aya::{maps::RingBuf, programs::TracePoint};
 use foverin::{
-    actuator::{apply_system_profile, current_governor},
-    brain::{Classifier, Workload, resolve_weights_path},
+    actuator::{current_governor, set_scaling_governor},
+    brain::PolicyEngine,
     state::AppState,
 };
 use foverin_common::{ProcessEvent, SOCKET_PATH};
@@ -42,19 +42,13 @@ async fn main() -> anyhow::Result<()> {
         debug!("remove limit on locked memory failed, ret is: {ret}");
     }
 
-    let weights_path = resolve_weights_path();
-    let classifier = Classifier::load(&weights_path).map_err(|err| {
-        anyhow::anyhow!(
-            "failed to load weights from {}: {err:#}\n\
-             Run `cargo build --release --bin forge && ./target/release/forge` first.",
-            weights_path.display()
-        )
-    })?;
+    let policy = PolicyEngine::open()?;
+    let memory_path = policy.memory_path().display().to_string();
 
     let state = Arc::new(Mutex::new(AppState::new(current_governor())));
     {
         let mut s = state.lock().unwrap_or_else(|e| e.into_inner());
-        s.status = format!("weights loaded — {}", weights_path.display());
+        s.status = format!("memory policy — {memory_path}");
     }
 
     let (broadcast_tx, _) = broadcast::channel::<String>(BROADCAST_CAP);
@@ -88,7 +82,7 @@ async fn main() -> anyhow::Result<()> {
     let state_bg = Arc::clone(&state);
     let bus = broadcast_tx.clone();
     let sensor = tokio::spawn(async move {
-        if let Err(err) = sensor_loop(classifier, events, state_bg, bus, shutdown_rx).await {
+        if let Err(err) = sensor_loop(policy, events, state_bg, bus, shutdown_rx).await {
             warn!("sensor loop exited: {err:#}");
         }
         // Keep the eBPF object alive for the lifetime of the sensor task.
@@ -108,8 +102,13 @@ async fn main() -> anyhow::Result<()> {
     }
 
     let _ = shutdown_tx.send(());
-    sensor.abort();
-    let _ = sensor.await;
+    // Let the sensor flush memory, then join (abort only if it hangs).
+    match tokio::time::timeout(Duration::from_secs(3), sensor).await {
+        Ok(Ok(())) => {}
+        Ok(Err(err)) if err.is_cancelled() => {}
+        Ok(Err(err)) => warn!("sensor join: {err}"),
+        Err(_) => warn!("sensor loop did not exit in time"),
+    }
     let _ = fs::remove_file(SOCKET_PATH);
     Ok(())
 }
@@ -151,7 +150,7 @@ async fn accept_loop(
 }
 
 async fn sensor_loop(
-    classifier: Classifier,
+    mut policy: PolicyEngine,
     mut events: AsyncFd<RingBuf<aya::maps::MapData>>,
     state: Arc<Mutex<AppState>>,
     bus: broadcast::Sender<String>,
@@ -171,6 +170,9 @@ async fn sensor_loop(
     loop {
         tokio::select! {
             _ = &mut shutdown => {
+                if let Err(err) = policy.flush() {
+                    warn!("failed to flush memory on shutdown: {err:#}");
+                }
                 break;
             }
             ready = events.readable_mut() => {
@@ -193,24 +195,7 @@ async fn sensor_loop(
             }
             _ = tick.tick() => {
                 let batch = std::mem::take(&mut buffer);
-                let decision = if batch.is_empty() {
-                    foverin::brain::AiDecision {
-                        detected_workload: Workload::Idle,
-                        confidence: 100.0,
-                        reason: "no process exec events in the aggregation window".into(),
-                        inference_us: 0,
-                    }
-                } else {
-                    match classifier.classify_events(&batch) {
-                        Ok(decision) => decision,
-                        Err(err) => {
-                            let mut s = state.lock().unwrap_or_else(|e| e.into_inner());
-                            s.status = format!("inference error: {err:#}");
-                            publish_snapshot(&state, &bus);
-                            continue;
-                        }
-                    }
-                };
+                let decision = policy.decide(&batch);
 
                 {
                     let mut s = state.lock().unwrap_or_else(|e| e.into_inner());
@@ -222,7 +207,7 @@ async fn sensor_loop(
                     s.status = decision.reason.clone();
                 }
 
-                match apply_system_profile(decision.detected_workload.as_str()) {
+                match set_scaling_governor(&decision.governor) {
                     Ok(report) => {
                         let mut s = state.lock().unwrap_or_else(|e| e.into_inner());
                         s.set_governor(report.governor);

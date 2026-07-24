@@ -28,11 +28,11 @@ mod ipc {
     pub struct StateSnapshot {
         /// Recent process exec lines (`pid=N  name`), oldest → newest.
         pub process_stream: Vec<String>,
-        /// Latest classified workload label, if any.
+        /// Latest soft workload label, if any.
         pub workload: Option<String>,
-        /// Softmax confidence percentage (0–100).
+        /// Policy confidence percentage (0–100).
         pub confidence: f32,
-        /// Last inference latency in microseconds.
+        /// Last policy decision latency in microseconds.
         pub latency_us: u64,
         /// Active CPU scaling governor.
         pub active_governor: String,

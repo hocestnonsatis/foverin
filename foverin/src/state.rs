@@ -8,13 +8,13 @@ use crate::brain::Workload;
 
 pub const PROCESS_STREAM_CAP: usize = 50;
 
-/// Snapshot of the latest nano-network decision for the UI.
+/// Snapshot of the latest memory-policy decision for the UI.
 #[derive(Debug, Clone, Copy)]
 pub struct DecisionSnapshot {
     pub workload: Workload,
-    /// Softmax confidence percentage (0–100).
+    /// Selection confidence percentage (0–100).
     pub confidence: f32,
-    /// Inference latency in microseconds.
+    /// Decision latency in microseconds.
     pub latency_us: u64,
 }
 

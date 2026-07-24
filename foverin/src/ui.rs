@@ -169,7 +169,7 @@ fn draw_inference(frame: &mut Frame<'_>, area: Rect, state: &StateSnapshot) {
         .borders(Borders::ALL)
         .border_style(Style::default().fg(GREEN))
         .title(Span::styled(
-            " NANO-NN INFERENCE ",
+            " MEMORY POLICY ",
             Style::default().fg(BRIGHT).add_modifier(Modifier::BOLD),
         ))
         .style(Style::default().bg(Color::Black));

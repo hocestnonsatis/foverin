@@ -11,8 +11,6 @@ See the **Installation** section in [README.md](README.md) (Arch/CachyOS,
 ```bash
 git clone https://github.com/hocestnonsatis/foverin.git
 cd foverin
-cargo build --release --bin forge
-./target/release/forge
 cargo build --release --bin foverin-daemon --bin foverin-cli
 ```
 
@@ -31,7 +29,8 @@ Userspace CI skips compiling the BPF object. Match that locally:
 FOVERIN_SKIP_EBPF=1 cargo fmt --all
 FOVERIN_SKIP_EBPF=1 cargo clippy -p foverin-common -p foverin --all-targets -- -D warnings
 FOVERIN_SKIP_EBPF=1 cargo check -p foverin-common --all-features
-FOVERIN_SKIP_EBPF=1 cargo check -p foverin --lib --bin foverin-cli --bin forge
+FOVERIN_SKIP_EBPF=1 cargo check -p foverin --lib --bin foverin-cli --bin foverin-daemon
+FOVERIN_SKIP_EBPF=1 cargo test -p foverin --lib
 ```
 
 If you touch `foverin-ebpf/`, `foverin/build.rs`, or the daemon loader, also run
@@ -43,7 +42,9 @@ a **full** local build **without** `FOVERIN_SKIP_EBPF` and smoke-test with
 | Path | Purpose |
 | --- | --- |
 | `foverin-ebpf/` | BPF program |
-| `foverin/src/brain.rs` | Candle classifier |
+| `foverin/src/brain.rs` | VOCAB fingerprint + soft labels + `PolicyEngine` |
+| `foverin/src/memory.rs` | Episodic buckets, UCB1, EMA, JSON persist |
+| `foverin/src/reward.rs` | Balanced reward from CPU / thermal / RAPL |
 | `foverin/src/actuator.rs` | cpufreq governor writes |
 | `foverin/src/bin/foverin-daemon.rs` | Privileged daemon + UDS |
 | `foverin/src/bin/foverin-cli.rs` | TUI client |
