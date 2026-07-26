@@ -41,7 +41,7 @@ a **full** local build **without** `FOVERIN_SKIP_EBPF` and smoke-test with
 
 | Path | Purpose |
 | --- | --- |
-| `foverin-ebpf/` | BPF program |
+| `foverin-ebpf/` | BPF program (exec sensor + Steam → `steam_app` lineage) |
 | `foverin/src/brain.rs` | VOCAB fingerprint + soft labels + `PolicyEngine` |
 | `foverin/src/memory.rs` | Episodic buckets, UCB1, EMA, JSON persist |
 | `foverin/src/reward.rs` | Balanced reward from CPU / thermal / RAPL |

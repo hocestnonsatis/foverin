@@ -397,7 +397,7 @@ checksum = "77ce24cb58228fbb8aa041425bb1050850ac19177686ea6e0f41a70416f56fdb"
 
 [[package]]
 name = "foverin"
-version = "0.2.0"
+version = "0.2.1"
 dependencies = [
  "anyhow",
  "aya",
@@ -417,7 +417,7 @@ dependencies = [
 
 [[package]]
 name = "foverin-common"
-version = "0.2.0"
+version = "0.2.1"
 dependencies = [
  "aya",
  "serde",
@@ -426,7 +426,7 @@ dependencies = [
 
 [[package]]
 name = "foverin-ebpf"
-version = "0.2.0"
+version = "0.2.1"
 dependencies = [
  "aya-ebpf",
  "foverin-common",

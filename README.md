@@ -60,7 +60,7 @@ No offline trainer. No neural weights. Policy lives in `foverin_memory.json`.
 
 ## The loop
 
-1. **Sense** — Aya eBPF on `sched_process_exec` streams `{ pid, filename }` into a RingBuf.
+1. **Sense** — Aya eBPF on `sched_process_exec` streams `{ pid, filename }` into a RingBuf. When the parent process `comm` is `steam`, the probe rewrites the event to a synthetic `steam_app` token so Proton/Wine game binaries that are out-of-vocabulary still fingerprint as gaming.
 2. **Fingerprint** — Every 5s, multi-hot-encode basenames against a fixed Linux VOCAB → `u64` bitset bucket key.
 3. **Decide** — Per-bucket UCB1 chooses among available governors (`performance` / `schedutil` / `powersave` / …). Cold buckets get heuristic priors (compile/game → performance bias).
 4. **Actuate** — Write the chosen governor to all CPUs via sysfs.
@@ -80,13 +80,13 @@ Persist every ~12 ticks and on clean shutdown. Override path: `FOVERIN_MEMORY`.
 ### Dependencies (CachyOS / Arch)
 
 ```bash
-sudo pacman -S --needed base-devel rustup llvm clang
+sudo pacman -S --needed base-devel rustup llvm clang dwarves
 rustup toolchain install nightly
 rustup +nightly component add rust-src
 cargo install bpf-linker
 ```
 
-Nightly is required for the eBPF crate (`build-std`). cpufreq sysfs must be writable (`scaling_governor`).
+Nightly is required for the eBPF crate (`build-std`). `pahole` (from `dwarves`) reads `task_struct` offsets from the build host’s BTF for Steam parent-lineage sensing — rebuild on the target kernel when deploying across machines. cpufreq sysfs must be writable (`scaling_governor`).
 
 ### Build
 
@@ -162,7 +162,7 @@ FOVERIN_SKIP_EBPF=1 cargo test -p foverin --lib
 | `foverin/src/memory.rs` | Buckets, UCB1, EMA, JSON persist |
 | `foverin/src/reward.rs` | Busy / thermal / RAPL → balanced score |
 | `foverin/src/actuator.rs` | `scaling_governor` writes |
-| `foverin-ebpf/` | BPF program |
+| `foverin-ebpf/` | BPF program (+ Steam lineage rewrite via BTF offsets) |
 
 See [CONTRIBUTING.md](CONTRIBUTING.md) and [CODE_OF_CONDUCT.md](.github/CODE_OF_CONDUCT.md).
 

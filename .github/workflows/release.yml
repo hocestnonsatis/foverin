@@ -18,10 +18,10 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Install LLVM / Clang (eBPF link)
+      - name: Install LLVM / Clang / pahole (eBPF link + BTF offsets)
         run: |
           sudo apt-get update
-          sudo apt-get install -y clang llvm lld libelf-dev
+          sudo apt-get install -y clang llvm lld libelf-dev dwarves
 
       # Userspace builds on stable — recent nightlies ICE'd compiling tokio in release.
       # eBPF still needs nightly + rust-src (aya-build / build-std).

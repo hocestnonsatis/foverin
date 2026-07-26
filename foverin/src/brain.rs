@@ -36,10 +36,11 @@ pub const VOCAB: &[&str] = &[
     "rust-lld",
     "collect2",
     "as",
-    // Gaming
+    // Gaming / Linux runners (incl. synthetic eBPF lineage token `steam_app`)
     "steam",
     "steamwebhelper",
     "steamos-logger",
+    "steam_app",
     "csgo",
     "cs2",
     "dota2",
@@ -48,6 +49,7 @@ pub const VOCAB: &[&str] = &[
     "wine",
     "wine64",
     "wineserver",
+    "lutris",
     "gamesoverlayui",
     // Browsing / media / light desktop
     "firefox",
@@ -74,8 +76,8 @@ pub const VOCAB: &[&str] = &[
 ];
 
 const COMPILE_END: usize = 17;
-const GAMING_END: usize = 29;
-const BROWSING_END: usize = 39;
+const GAMING_END: usize = 31;
+const BROWSING_END: usize = 41;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 #[repr(u8)]
@@ -306,6 +308,23 @@ mod tests {
     }
 
     #[test]
+    fn soft_label_steam_app_is_gaming() {
+        let v = encode_names(["steam_app"]);
+        assert_eq!(soft_label(&v), Workload::Gaming);
+        assert_eq!(Workload::Gaming.prior_governor(), "performance");
+    }
+
+    #[test]
+    fn encode_gaming_lineage_tokens() {
+        let v = encode_names(["steam_app", "wine64", "lutris", "proton"]);
+        for token in ["steam_app", "wine64", "lutris", "proton"] {
+            let idx = VOCAB.iter().position(|x| *x == token).unwrap();
+            assert_eq!(v[idx], 1.0, "{token} must be in VOCAB");
+        }
+        assert_eq!(soft_label(&v), Workload::Gaming);
+    }
+
+    #[test]
     fn fingerprint_stable() {
         let a = encode_names(["cargo", "rustc"]);
         let b = encode_names(["rustc", "cargo"]);
@@ -318,8 +337,8 @@ mod tests {
     fn vocab_fits_u64() {
         assert!(VOCAB.len() <= 64);
         assert_eq!(COMPILE_END, 17);
-        assert_eq!(GAMING_END, 29);
-        assert_eq!(BROWSING_END, 39);
-        assert_eq!(VOCAB.len(), 49);
+        assert_eq!(GAMING_END, 31);
+        assert_eq!(BROWSING_END, 41);
+        assert_eq!(VOCAB.len(), 51);
     }
 }
