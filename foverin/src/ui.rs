@@ -9,9 +9,9 @@ use std::{
 use crossterm::event::{self, Event, KeyCode, KeyEventKind};
 use foverin_common::StateSnapshot;
 use ratatui::{
-    Frame, Terminal,
+    DefaultTerminal, Frame,
     layout::{Constraint, Direction, Layout, Rect},
-    style::{Color, Modifier, Style, Stylize},
+    style::{Color, Modifier, Style},
     text::{Line, Span},
     widgets::{Block, Borders, Gauge, List, ListItem, Paragraph},
 };
@@ -38,7 +38,7 @@ pub fn run_fatal_unreachable() -> io::Result<()> {
     result
 }
 
-fn fatal_loop(terminal: &mut Terminal<impl ratatui::backend::Backend>) -> io::Result<()> {
+fn fatal_loop(terminal: &mut DefaultTerminal) -> io::Result<()> {
     loop {
         terminal.draw(|frame| {
             let area = frame.area();
@@ -73,10 +73,7 @@ fn fatal_loop(terminal: &mut Terminal<impl ratatui::backend::Backend>) -> io::Re
     Ok(())
 }
 
-fn ui_loop(
-    terminal: &mut Terminal<impl ratatui::backend::Backend>,
-    state: Arc<Mutex<StateSnapshot>>,
-) -> io::Result<()> {
+fn ui_loop(terminal: &mut DefaultTerminal, state: Arc<Mutex<StateSnapshot>>) -> io::Result<()> {
     loop {
         let frame_start = Instant::now();
 
