@@ -55,7 +55,8 @@ jobs:
 
       - name: Test foverin lib
         # .cargo/config.toml sets a root runner for eBPF binaries; unit tests
-        # must not go through sudo on GitHub-hosted runners.
+        # must not go through sudo on GitHub-hosted runners. Cargo rejects an
+        # empty runner, so shell out to `env` as a transparent no-op wrapper.
         env:
-          CARGO_TARGET_X86_64_UNKNOWN_LINUX_GNU_RUNNER: ""
+          CARGO_TARGET_X86_64_UNKNOWN_LINUX_GNU_RUNNER: env
         run: cargo test -p foverin --lib

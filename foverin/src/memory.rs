@@ -274,8 +274,9 @@ pub fn resolve_memory_path() -> PathBuf {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
     use std::time::{SystemTime, UNIX_EPOCH};
+
+    use super::*;
 
     fn tmp_path(name: &str) -> PathBuf {
         let nanos = SystemTime::now()
